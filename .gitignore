@@ -1,0 +1,80 @@
+# Python bytecode / extensions
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Python packaging / build
+.Python
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+*.egg
+.installed.cfg
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+.venv_broken_*/
+venv/
+env/
+ENV/
+.python-version
+
+# Python tool caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.nox/
+.tox/
+.benchmarks/
+.coverage
+.coverage.*
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs / temp
+*.log
+*.tmp
+*.pid
+*.pid.lock
+*.seed
+
+# Environment and local secrets
+.env
+.env.*
+*.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project-generated artifacts
+data/raw/ha_telemetry.csv
+data/raw/sensor_data.csv
+data/processed/action_labels.csv
+data/processed/manual_window_state.json
+data/processed/*.db
+data/processed/*.db-shm
+data/processed/*.db-wal
+models/*.pkl
+models/*.joblib
