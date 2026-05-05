@@ -22,6 +22,8 @@ MQTT_TOPIC_STATE = os.getenv("MQTT_TOPIC_STATE", "smart_room/telemetry/state")
 MQTT_CONNECT_TIMEOUT_SECONDS = int(os.getenv("MQTT_CONNECT_TIMEOUT_SECONDS", "8"))
 WEATHER_LATITUDE = float(os.getenv("WEATHER_LATITUDE", "40.6405"))
 WEATHER_LONGITUDE = float(os.getenv("WEATHER_LONGITUDE", "-8.6538"))
+WEATHER_REFRESH_SECONDS = int(os.getenv("WEATHER_REFRESH_SECONDS", "300"))
+WEATHER_API_TIMEOUT_SECONDS = float(os.getenv("WEATHER_API_TIMEOUT_SECONDS", "4"))
 INDOOR_TEMP_UNIT = os.getenv("INDOOR_TEMP_UNIT", "auto").strip().lower()
 
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "5"))
@@ -59,6 +61,13 @@ headers = {
     "Authorization": f"Bearer {HA_TOKEN}",
     "Content-Type": "application/json",
 }
+
+_last_outdoor_weather: dict[str, float | None] = {
+    "outdoor_temp_c": None,
+    "outdoor_humidity_pct": None,
+    "outdoor_pressure_hpa": None,
+}
+_last_outdoor_fetch_ts: float = 0.0
 
 
 def get_state(entity_id: str) -> str:
@@ -154,26 +163,42 @@ def _to_celsius(value: float, unit: str | None) -> float:
 
 
 def _fetch_outdoor_weather() -> dict[str, float | None]:
+    global _last_outdoor_fetch_ts
+
+    now = time.time()
+    cache_is_valid = (
+        _last_outdoor_weather["outdoor_temp_c"] is not None
+        and _last_outdoor_weather["outdoor_humidity_pct"] is not None
+        and _last_outdoor_weather["outdoor_pressure_hpa"] is not None
+        and (now - _last_outdoor_fetch_ts) < max(1, WEATHER_REFRESH_SECONDS)
+    )
+    if cache_is_valid:
+        return dict(_last_outdoor_weather)
+
     weather_url = (
         "https://api.open-meteo.com/v1/forecast"
         f"?latitude={WEATHER_LATITUDE}&longitude={WEATHER_LONGITUDE}"
         "&current=temperature_2m,relative_humidity_2m,surface_pressure"
     )
     try:
-        response = requests.get(weather_url, timeout=4)
+        response = requests.get(weather_url, timeout=WEATHER_API_TIMEOUT_SECONDS)
         response.raise_for_status()
         current = response.json().get("current", {})
-        return {
+        parsed = {
             "outdoor_temp_c": _to_float_or_none(str(current.get("temperature_2m"))),
             "outdoor_humidity_pct": _to_float_or_none(str(current.get("relative_humidity_2m"))),
             "outdoor_pressure_hpa": _to_float_or_none(str(current.get("surface_pressure"))),
         }
+        if all(parsed[key] is not None for key in parsed):
+            _last_outdoor_weather.update(parsed)
+            _last_outdoor_fetch_ts = now
+            return parsed
+
+        # If response is malformed, keep last known good values.
+        return dict(_last_outdoor_weather)
     except Exception:
-        return {
-            "outdoor_temp_c": None,
-            "outdoor_humidity_pct": None,
-            "outdoor_pressure_hpa": None,
-        }
+        # Keep previously known outdoor values on transient API/network failure.
+        return dict(_last_outdoor_weather)
 
 
 def _build_payload() -> dict[str, Any]:
