@@ -20,6 +20,9 @@ MQTT_USER = os.getenv("MQTT_USER", "mqtt_user")
 MQTT_PASS = os.getenv("MQTT_PASS", "password")
 MQTT_TOPIC_STATE = os.getenv("MQTT_TOPIC_STATE", "smart_room/telemetry/state")
 MQTT_CONNECT_TIMEOUT_SECONDS = int(os.getenv("MQTT_CONNECT_TIMEOUT_SECONDS", "8"))
+WEATHER_LATITUDE = float(os.getenv("WEATHER_LATITUDE", "40.6405"))
+WEATHER_LONGITUDE = float(os.getenv("WEATHER_LONGITUDE", "-8.6538"))
+INDOOR_TEMP_UNIT = os.getenv("INDOOR_TEMP_UNIT", "auto").strip().lower()
 
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "5"))
 WINDOW_ENTITY = os.getenv("WINDOW_ENTITY", "binary_sensor.lumi_lumi_sensor_magnet_aq2_opening")
@@ -63,6 +66,16 @@ def get_state(entity_id: str) -> str:
     response = requests.get(url, headers=headers, timeout=5)
     response.raise_for_status()
     return response.json()["state"]
+
+
+def get_state_payload(entity_id: str) -> dict[str, Any]:
+    url = f"{HA_URL}/api/states/{entity_id}"
+    response = requests.get(url, headers=headers, timeout=5)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid Home Assistant state payload")
+    return payload
 
 
 def _to_float_or_none(value: str | None) -> float | None:
@@ -109,18 +122,86 @@ def _safe_get_state(entity_id: str | None) -> str | None:
     return state
 
 
+def _safe_get_state_payload(entity_id: str | None) -> dict[str, Any] | None:
+    if not entity_id:
+        return None
+    try:
+        payload = get_state_payload(entity_id)
+    except Exception:
+        return None
+
+    state = str(payload.get("state", "")).strip().lower()
+    if state in {"unknown", "unavailable", "none", ""}:
+        return None
+    return payload
+
+
+def _to_celsius(value: float, unit: str | None) -> float:
+    normalized = (unit or "").strip().lower().replace(" ", "")
+    if normalized in {"°f", "f", "fahrenheit"}:
+        return (value - 32.0) * (5.0 / 9.0)
+    if normalized in {"°c", "c", "celsius"}:
+        return value
+
+    # Fallback when unit metadata is missing.
+    if INDOOR_TEMP_UNIT in {"f", "fahrenheit"}:
+        return (value - 32.0) * (5.0 / 9.0)
+    if INDOOR_TEMP_UNIT in {"c", "celsius"}:
+        return value
+
+    # auto mode heuristic: indoor values above 60 are likely Fahrenheit.
+    return (value - 32.0) * (5.0 / 9.0) if value > 60.0 else value
+
+
+def _fetch_outdoor_weather() -> dict[str, float | None]:
+    weather_url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={WEATHER_LATITUDE}&longitude={WEATHER_LONGITUDE}"
+        "&current=temperature_2m,relative_humidity_2m,surface_pressure"
+    )
+    try:
+        response = requests.get(weather_url, timeout=4)
+        response.raise_for_status()
+        current = response.json().get("current", {})
+        return {
+            "outdoor_temp_c": _to_float_or_none(str(current.get("temperature_2m"))),
+            "outdoor_humidity_pct": _to_float_or_none(str(current.get("relative_humidity_2m"))),
+            "outdoor_pressure_hpa": _to_float_or_none(str(current.get("surface_pressure"))),
+        }
+    except Exception:
+        return {
+            "outdoor_temp_c": None,
+            "outdoor_humidity_pct": None,
+            "outdoor_pressure_hpa": None,
+        }
+
+
 def _build_payload() -> dict[str, Any]:
-    temperature_state = _safe_get_state(ENTITIES.get("temperature"))
+    temperature_payload = _safe_get_state_payload(ENTITIES.get("temperature"))
+    temperature_state = temperature_payload.get("state") if temperature_payload else None
+    temperature_unit = None
+    if temperature_payload:
+        attributes = temperature_payload.get("attributes", {})
+        if isinstance(attributes, dict):
+            temperature_unit = attributes.get("unit_of_measurement")
+
     humidity_state = _safe_get_state(ENTITIES.get("humidity"))
     pressure_state = _safe_get_state(ENTITIES.get("pressure"))
     motion_state = _safe_get_state(ENTITIES.get("motion"))
     window_state = _safe_get_state(ENTITIES.get("window"))
+    outdoor = _fetch_outdoor_weather()
+
+    indoor_temp_raw = _to_float_or_none(str(temperature_state) if temperature_state is not None else None)
+    indoor_temp_c = _to_celsius(indoor_temp_raw, str(temperature_unit) if temperature_unit is not None else None) if indoor_temp_raw is not None else None
 
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "temperature_c": _to_float_or_none(temperature_state),
+        "temperature_c": round(indoor_temp_c, 3) if indoor_temp_c is not None else None,
         "humidity_pct": _to_float_or_none(humidity_state),
         "pressure": _to_float_or_none(pressure_state),
+        "outdoor_temp_c": outdoor["outdoor_temp_c"],
+        "outdoor_humidity_pct": outdoor["outdoor_humidity_pct"],
+        "outdoor_pressure_hpa": outdoor["outdoor_pressure_hpa"],
         "motion": _to_bool_or_none(motion_state),
         "window_open": _to_window_open_bool(window_state),
     }

@@ -22,6 +22,9 @@ class TelemetryCollector:
             "temperature_c",
             "humidity_pct",
             "pressure",
+            "outdoor_temp_c",
+            "outdoor_humidity_pct",
+            "outdoor_pressure_hpa",
             "motion",
             "window_open",
             "window_open_source",
@@ -69,6 +72,16 @@ class TelemetryCollector:
 
     def _append_row(self, row: dict[str, Any]) -> None:
         file_exists = self.csv_path.exists() and self.csv_path.stat().st_size > 0
+        if file_exists:
+            with self.csv_path.open("r", newline="", encoding="utf-8") as csv_file:
+                reader = csv.reader(csv_file)
+                existing_header = next(reader, [])
+            if existing_header != self.fieldnames:
+                raise RuntimeError(
+                    "CSV header does not match current schema. "
+                    "Backup/remove the CSV and restart collector to create a new header."
+                )
+
         with self.csv_path.open("a", newline="", encoding="utf-8") as csv_file:
             writer = csv.DictWriter(csv_file, fieldnames=self.fieldnames)
             if not file_exists:

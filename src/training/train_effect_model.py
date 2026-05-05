@@ -50,6 +50,9 @@ def train_effect_models(
         "temperature_c",
         "humidity_pct",
         "pressure",
+        "outdoor_temp_c",
+        "outdoor_humidity_pct",
+        "outdoor_pressure_hpa",
         "motion",
         "hour_of_day",
         "temperature_c_t_plus",
@@ -62,7 +65,16 @@ def train_effect_models(
     df["timestamp_action"] = pd.to_datetime(df["timestamp_action"], utc=True, errors="coerce")
     df = df.dropna(subset=["timestamp_action"]).sort_values("timestamp_action").reset_index(drop=True)
 
-    feature_cols = ["temperature_c", "humidity_pct", "pressure", "motion", "hour_of_day"]
+    feature_cols = [
+        "temperature_c",
+        "humidity_pct",
+        "pressure",
+        "outdoor_temp_c",
+        "outdoor_humidity_pct",
+        "outdoor_pressure_hpa",
+        "motion",
+        "hour_of_day",
+    ]
     target_cols = ["temperature_c_t_plus", "humidity_pct_t_plus"]
 
     model_bundle: dict[str, Any] = {
