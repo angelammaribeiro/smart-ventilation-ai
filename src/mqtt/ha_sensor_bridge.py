@@ -323,14 +323,21 @@ def _connect_mqtt() -> None:
         ) from exc
 
 
+def _publish(topic: str, payload: Any) -> None:
+    info = client.publish(topic, payload, qos=0)
+    if info.rc != mqtt.MQTT_ERR_SUCCESS:
+        print(f"MQTT publish failed: topic={topic} rc={info.rc}")
+
+
 def main() -> None:
     if not HA_TOKEN:
         raise RuntimeError("HA_TOKEN is not set. Export HA_TOKEN before running this script.")
 
     _connect_mqtt()
+    client.loop_start()
 
-    while True:
-        try:
+    try:
+        while True:
             payload = _build_payload()
 
             temp = payload["temperature_c"]
@@ -340,26 +347,28 @@ def main() -> None:
             co2_ppm = payload["co2_ppm"]
             air_quality_level = payload["air_quality_level"]
 
-            client.publish(MQTT_TOPIC_STATE, json.dumps(payload), qos=0)
+            _publish(MQTT_TOPIC_STATE, json.dumps(payload))
 
             if temp is not None:
-                client.publish("smart_room/indoor/temperature", temp)
+                _publish("smart_room/indoor/temperature", temp)
             if hum is not None:
-                client.publish("smart_room/indoor/humidity", hum)
+                _publish("smart_room/indoor/humidity", hum)
             if window is not None:
-                client.publish("smart_room/window/open", int(window))
+                _publish("smart_room/window/open", int(window))
             if motion is not None:
-                client.publish("smart_room/motion", int(motion))
+                _publish("smart_room/motion", int(motion))
             if co2_ppm is not None:
-                client.publish("smart_room/air/co2_ppm", co2_ppm)
+                _publish("smart_room/air/co2_ppm", co2_ppm)
             if air_quality_level is not None:
-                client.publish("smart_room/air/quality_level", air_quality_level)
+                _publish("smart_room/air/quality_level", air_quality_level)
 
             print("Published state:", payload)
-        except Exception as exc:
-            print("Erro:", exc)
-
-        time.sleep(POLL_SECONDS)
+            time.sleep(POLL_SECONDS)
+    except Exception as exc:
+        print("Erro:", exc)
+    finally:
+        client.loop_stop()
+        client.disconnect()
 
 
 if __name__ == "__main__":
