@@ -287,9 +287,8 @@ def _build_payload() -> dict[str, Any]:
         "outdoor_pressure_hpa": outdoor["outdoor_pressure_hpa"],
         "motion": motion,
         "window_open": window_open,
-        "co2_ppm_estimated": round(co2_ppm_estimated, 1),
+        "co2_ppm": round(co2_ppm_estimated, 1),
         "air_quality_level": air_quality_level,
-        "air_quality_source": "simulated",
     }
 
 
