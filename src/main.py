@@ -21,6 +21,8 @@ def run_once(
     mqtt_enabled: bool = False,
     mqtt_host: str = "localhost",
     mqtt_port: int = 1883,
+    mqtt_user: str = "",
+    mqtt_pass: str = "",
 ) -> dict:
     dht20 = DHT20Sensor(use_mock=True)
     scd30 = SCD30Sensor(use_mock=True)
@@ -33,7 +35,13 @@ def run_once(
 
     logger = DataLogger(csv_path="data/raw/sensor_data.csv")
     sqlite_logger = SQLiteLogger(db_path="data/processed/observations.db")
-    mqtt_client = MQTTClient(host=mqtt_host, port=mqtt_port, enabled=mqtt_enabled)
+    mqtt_client = MQTTClient(
+        host=mqtt_host,
+        port=mqtt_port,
+        enabled=mqtt_enabled,
+        username=mqtt_user,
+        password=mqtt_pass,
+    )
 
     dht_reading = dht20.read()
     co2_ppm = scd30.read_co2()
@@ -95,6 +103,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mqtt-enabled", action="store_true")
     parser.add_argument("--mqtt-host", default="localhost")
     parser.add_argument("--mqtt-port", type=int, default=1883)
+    parser.add_argument("--mqtt-user", default="")
+    parser.add_argument("--mqtt-pass", default="")
     return parser.parse_args()
 
 
@@ -109,6 +119,8 @@ if __name__ == "__main__":
             mqtt_enabled=args.mqtt_enabled,
             mqtt_host=args.mqtt_host,
             mqtt_port=args.mqtt_port,
+            mqtt_user=args.mqtt_user,
+            mqtt_pass=args.mqtt_pass,
         )
         print(f"Smart Ventilation result (cycle {cycle}):")
         for key, value in result.items():
