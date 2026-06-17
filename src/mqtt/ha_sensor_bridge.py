@@ -68,6 +68,7 @@ _last_outdoor_weather: dict[str, float | None] = {
     "outdoor_pressure_hpa": None,
 }
 _last_outdoor_fetch_ts: float = 0.0
+_last_co2_estimate_ppm: float = 620.0
 
 
 def get_state(entity_id: str) -> str:
@@ -201,6 +202,52 @@ def _fetch_outdoor_weather() -> dict[str, float | None]:
         return dict(_last_outdoor_weather)
 
 
+def _estimate_co2_ppm(humidity_pct: float | None, motion: bool | None, window_open: bool | None) -> float:
+    global _last_co2_estimate_ppm
+
+    # Simulated indoor air-quality proxy for demos when no physical CO2 sensor is available.
+    # We compute a contextual target and then move gradually toward it.
+    target_ppm = 560.0
+    if motion:
+        target_ppm += 180.0
+
+    if window_open is True:
+        target_ppm -= 90.0
+    elif window_open is False:
+        target_ppm += 170.0
+
+    if humidity_pct is not None:
+        target_ppm += max(0.0, (humidity_pct - 60.0) * 1.6)
+
+    target_ppm = max(420.0, min(target_ppm, 2000.0))
+
+    # Inertia to avoid unrealistic jumps when conditions change between samples.
+    delta = target_ppm - _last_co2_estimate_ppm
+
+    # Scale per-cycle max step by poll interval (defaults to 5s -> ~30 ppm per sample).
+    poll_seconds = max(1.0, float(POLL_SECONDS))
+    max_step = max(15.0, min(60.0, 6.0 * poll_seconds))
+
+    if delta > max_step:
+        delta = max_step
+    elif delta < -max_step:
+        delta = -max_step
+
+    # Small damping keeps trajectories smooth and plausible.
+    _last_co2_estimate_ppm += delta * 0.75
+    _last_co2_estimate_ppm = max(420.0, min(_last_co2_estimate_ppm, 2000.0))
+
+    return _last_co2_estimate_ppm
+
+
+def _air_quality_level_from_co2(co2_ppm: float) -> str:
+    if co2_ppm < 800.0:
+        return "good"
+    if co2_ppm <= 1200.0:
+        return "moderate"
+    return "poor"
+
+
 def _build_payload() -> dict[str, Any]:
     temperature_payload = _safe_get_state_payload(ENTITIES.get("temperature"))
     temperature_state = temperature_payload.get("state") if temperature_payload else None
@@ -218,17 +265,31 @@ def _build_payload() -> dict[str, Any]:
 
     indoor_temp_raw = _to_float_or_none(str(temperature_state) if temperature_state is not None else None)
     indoor_temp_c = _to_celsius(indoor_temp_raw, str(temperature_unit) if temperature_unit is not None else None) if indoor_temp_raw is not None else None
+    humidity_pct = _to_float_or_none(humidity_state)
+    pressure = _to_float_or_none(pressure_state)
+    motion = _to_bool_or_none(motion_state)
+    window_open = _to_window_open_bool(window_state)
+
+    co2_ppm_estimated = _estimate_co2_ppm(
+        humidity_pct=humidity_pct,
+        motion=motion,
+        window_open=window_open,
+    )
+    air_quality_level = _air_quality_level_from_co2(co2_ppm_estimated)
 
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "temperature_c": round(indoor_temp_c, 3) if indoor_temp_c is not None else None,
-        "humidity_pct": _to_float_or_none(humidity_state),
-        "pressure": _to_float_or_none(pressure_state),
+        "humidity_pct": humidity_pct,
+        "pressure": pressure,
         "outdoor_temp_c": outdoor["outdoor_temp_c"],
         "outdoor_humidity_pct": outdoor["outdoor_humidity_pct"],
         "outdoor_pressure_hpa": outdoor["outdoor_pressure_hpa"],
-        "motion": _to_bool_or_none(motion_state),
-        "window_open": _to_window_open_bool(window_state),
+        "motion": motion,
+        "window_open": window_open,
+        "co2_ppm_estimated": round(co2_ppm_estimated, 1),
+        "air_quality_level": air_quality_level,
+        "air_quality_source": "simulated",
     }
 
 
@@ -263,6 +324,8 @@ def main() -> None:
             hum = payload["humidity_pct"]
             window = payload["window_open"]
             motion = payload["motion"]
+            co2_ppm_estimated = payload["co2_ppm_estimated"]
+            air_quality_level = payload["air_quality_level"]
 
             client.publish(MQTT_TOPIC_STATE, json.dumps(payload), qos=0)
 
@@ -274,6 +337,10 @@ def main() -> None:
                 client.publish("smart_room/window/open", int(window))
             if motion is not None:
                 client.publish("smart_room/motion", int(motion))
+            if co2_ppm_estimated is not None:
+                client.publish("smart_room/air/co2_ppm_estimated", co2_ppm_estimated)
+            if air_quality_level is not None:
+                client.publish("smart_room/air/quality_level", air_quality_level)
 
             print("Published state:", payload)
         except Exception as exc:
