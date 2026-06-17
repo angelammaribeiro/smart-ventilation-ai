@@ -9,6 +9,27 @@ import pandas as pd
 ALLOWED_ACTIONS = {"open_window", "close_window"}
 
 
+def _co2_from_row(row: pd.Series) -> float | None:
+    for key in ("co2_ppm", "co2_ppm_estimated"):
+        value = row.get(key)
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+
+    # Fallback for historical files with only qualitative air quality.
+    level = str(row.get("air_quality_level", "")).strip().lower()
+    if level == "good":
+        return 650.0
+    if level == "moderate":
+        return 950.0
+    if level == "poor":
+        return 1350.0
+    return None
+
+
 @dataclass
 class BuildStats:
     total_labels: int
@@ -76,12 +97,14 @@ def build_pairs(
                 "action_label": action,
                 "temperature_c": context_row.get("temperature_c"),
                 "humidity_pct": context_row.get("humidity_pct"),
+                "co2_ppm": _co2_from_row(context_row),
                 "pressure": context_row.get("pressure"),
                 "outdoor_temp_c": context_row.get("outdoor_temp_c"),
                 "outdoor_humidity_pct": context_row.get("outdoor_humidity_pct"),
                 "outdoor_pressure_hpa": context_row.get("outdoor_pressure_hpa"),
                 "motion": context_row.get("motion"),
                 "hour_of_day": int(t_action.hour),
+                "co2_ppm_t_plus": _co2_from_row(future_row),
                 "temperature_c_t_plus": future_row.get("temperature_c"),
                 "humidity_pct_t_plus": future_row.get("humidity_pct"),
             }
@@ -89,7 +112,9 @@ def build_pairs(
 
     output = pd.DataFrame(rows)
     if not output.empty:
-        output = output.dropna(subset=["temperature_c", "humidity_pct", "temperature_c_t_plus", "humidity_pct_t_plus"])
+        output = output.dropna(
+            subset=["temperature_c", "humidity_pct", "co2_ppm", "co2_ppm_t_plus", "temperature_c_t_plus"]
+        )
     output.to_csv(output_csv, index=False)
 
     return BuildStats(

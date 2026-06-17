@@ -29,12 +29,58 @@ class Predictor:
         except Exception:
             self.model = None
 
-    def predict_next_10min(self, features: Dict[str, float]) -> PredictionResult:
+    def _predict_with_loaded_model(self, ordered: np.ndarray, features: Dict[str, float]) -> PredictionResult | None:
         if self.model is None:
-            co2_t_plus_10 = self._fallback_co2_forecast(features)
-            temp_t_plus_10 = self._fallback_temp_forecast(features)
+            return None
+
+        # train_effect_model saves a bundle dict with separate models per action.
+        if isinstance(self.model, dict) and "models" in self.model:
+            action = "open_window" if int(features.get("window_open", 0)) == 1 else "close_window"
+            model_by_action = self.model.get("models", {})
+            action_model = model_by_action.get(action)
+            if action_model is None:
+                return None
+
+            feature_cols = self.model.get("feature_cols")
+            if not isinstance(feature_cols, list) or not feature_cols:
+                return None
+
+            defaults_by_col = {
+                "temperature_c": float(features.get("temp_in", 22.0)),
+                "humidity_pct": float(features.get("humidity_in", 50.0)),
+                "pressure": 1013.0,
+                "outdoor_temp_c": float(features.get("temp_out", 18.0)),
+                "outdoor_humidity_pct": float(features.get("humidity_out", 55.0)),
+                "outdoor_pressure_hpa": 1013.0,
+                "motion": 0.0,
+                "hour_of_day": float(features.get("hour_of_day", 12.0)),
+            }
+
+            ordered_for_bundle = np.array(
+                [[float(defaults_by_col.get(col, 0.0)) for col in feature_cols]],
+                dtype=float,
+            )
+
+            prediction = action_model.predict(ordered_for_bundle)[0]
+            target_cols = self.model.get("target_cols")
+            if not isinstance(target_cols, list) or len(target_cols) < 2:
+                return None
+
+            pred_map = {target_cols[i]: float(prediction[i]) for i in range(min(len(prediction), len(target_cols)))}
+
+            co2_t_plus_10 = pred_map.get("co2_ppm_t_plus", self._fallback_co2_forecast(features))
+            temp_t_plus_10 = pred_map.get("temperature_c_t_plus", self._fallback_temp_forecast(features))
             return PredictionResult(co2_t_plus_10=co2_t_plus_10, temp_t_plus_10=temp_t_plus_10)
 
+        # Backward compatibility: direct regressor model that outputs [co2, temp].
+        if hasattr(self.model, "predict"):
+            prediction = self.model.predict(ordered)[0]
+            if isinstance(prediction, (list, tuple, np.ndarray)) and len(prediction) >= 2:
+                return PredictionResult(co2_t_plus_10=float(prediction[0]), temp_t_plus_10=float(prediction[1]))
+
+        return None
+
+    def predict_next_10min(self, features: Dict[str, float]) -> PredictionResult:
         ordered = np.array(
             [[
                 features["temp_in"],
@@ -50,10 +96,9 @@ class Predictor:
             dtype=float,
         )
 
-        prediction = self.model.predict(ordered)[0]
-
-        if isinstance(prediction, (list, tuple, np.ndarray)) and len(prediction) >= 2:
-            return PredictionResult(co2_t_plus_10=float(prediction[0]), temp_t_plus_10=float(prediction[1]))
+        model_prediction = self._predict_with_loaded_model(ordered, features)
+        if model_prediction is not None:
+            return model_prediction
 
         return PredictionResult(
             co2_t_plus_10=self._fallback_co2_forecast(features),

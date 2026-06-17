@@ -154,6 +154,8 @@ def run_once(
         pred_co2_open=scenario.pred_co2_open,
         pred_temp_open=scenario.pred_temp_open,
         temp_now=observation.temperature_c,
+        temp_out_now=observation.temp_out,
+        is_raining_now=bool(observation.is_raining),
     )
 
     row = observation.to_dict()

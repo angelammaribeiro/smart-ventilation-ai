@@ -20,8 +20,8 @@ class ActionModelResult:
     action: str
     train_size: int
     test_size: int
+    mae_co2: float
     mae_temp: float
-    mae_humidity: float
 
 
 
@@ -49,14 +49,15 @@ def train_effect_models(
         "action_label",
         "temperature_c",
         "humidity_pct",
+        "co2_ppm",
         "pressure",
         "outdoor_temp_c",
         "outdoor_humidity_pct",
         "outdoor_pressure_hpa",
         "motion",
         "hour_of_day",
+        "co2_ppm_t_plus",
         "temperature_c_t_plus",
-        "humidity_pct_t_plus",
     }
     missing = required - set(df.columns)
     if missing:
@@ -68,6 +69,7 @@ def train_effect_models(
     feature_cols = [
         "temperature_c",
         "humidity_pct",
+        "co2_ppm",
         "pressure",
         "outdoor_temp_c",
         "outdoor_humidity_pct",
@@ -75,7 +77,7 @@ def train_effect_models(
         "motion",
         "hour_of_day",
     ]
-    target_cols = ["temperature_c_t_plus", "humidity_pct_t_plus"]
+    target_cols = ["co2_ppm_t_plus", "temperature_c_t_plus"]
 
     model_bundle: dict[str, Any] = {
         "feature_cols": feature_cols,
@@ -111,8 +113,8 @@ def train_effect_models(
         model.fit(X_train, y_train)
 
         pred = model.predict(X_test)
-        mae_temp = mean_absolute_error(y_test["temperature_c_t_plus"], pred[:, 0])
-        mae_humidity = mean_absolute_error(y_test["humidity_pct_t_plus"], pred[:, 1])
+        mae_co2 = mean_absolute_error(y_test["co2_ppm_t_plus"], pred[:, 0])
+        mae_temp = mean_absolute_error(y_test["temperature_c_t_plus"], pred[:, 1])
 
         model_bundle["models"][action] = model
         results.append(
@@ -120,8 +122,8 @@ def train_effect_models(
                 action=action,
                 train_size=len(train_df),
                 test_size=len(test_df),
+                mae_co2=float(mae_co2),
                 mae_temp=float(mae_temp),
-                mae_humidity=float(mae_humidity),
             )
         )
 
@@ -158,5 +160,5 @@ if __name__ == "__main__":
     for result in run_results:
         print(
             f"- action={result.action} train={result.train_size} test={result.test_size} "
-            f"MAE_temp={result.mae_temp:.3f} MAE_humidity={result.mae_humidity:.3f}"
+            f"MAE_co2={result.mae_co2:.3f} MAE_temp={result.mae_temp:.3f}"
         )

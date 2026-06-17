@@ -21,6 +21,8 @@ class TelemetryCollector:
             "timestamp",
             "temperature_c",
             "humidity_pct",
+            "co2_ppm",
+            "air_quality_level",
             "pressure",
             "outdoor_temp_c",
             "outdoor_humidity_pct",
