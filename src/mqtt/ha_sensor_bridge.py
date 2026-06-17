@@ -270,12 +270,12 @@ def _build_payload() -> dict[str, Any]:
     motion = _to_bool_or_none(motion_state)
     window_open = _to_window_open_bool(window_state)
 
-    co2_ppm_estimated = _estimate_co2_ppm(
+    co2_ppm = _estimate_co2_ppm(
         humidity_pct=humidity_pct,
         motion=motion,
         window_open=window_open,
     )
-    air_quality_level = _air_quality_level_from_co2(co2_ppm_estimated)
+    air_quality_level = _air_quality_level_from_co2(co2_ppm)
 
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -287,7 +287,7 @@ def _build_payload() -> dict[str, Any]:
         "outdoor_pressure_hpa": outdoor["outdoor_pressure_hpa"],
         "motion": motion,
         "window_open": window_open,
-        "co2_ppm": round(co2_ppm_estimated, 1),
+        "co2_ppm": round(co2_ppm, 1),
         "air_quality_level": air_quality_level,
     }
 
@@ -323,7 +323,7 @@ def main() -> None:
             hum = payload["humidity_pct"]
             window = payload["window_open"]
             motion = payload["motion"]
-            co2_ppm_estimated = payload["co2_ppm_estimated"]
+            co2_ppm = payload["co2_ppm"]
             air_quality_level = payload["air_quality_level"]
 
             client.publish(MQTT_TOPIC_STATE, json.dumps(payload), qos=0)
@@ -336,8 +336,8 @@ def main() -> None:
                 client.publish("smart_room/window/open", int(window))
             if motion is not None:
                 client.publish("smart_room/motion", int(motion))
-            if co2_ppm_estimated is not None:
-                client.publish("smart_room/air/co2_ppm_estimated", co2_ppm_estimated)
+            if co2_ppm is not None:
+                client.publish("smart_room/air/co2_ppm", co2_ppm)
             if air_quality_level is not None:
                 client.publish("smart_room/air/quality_level", air_quality_level)
 
