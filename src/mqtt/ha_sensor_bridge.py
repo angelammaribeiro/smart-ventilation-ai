@@ -69,6 +69,8 @@ _last_outdoor_weather: dict[str, float | None] = {
 }
 _last_outdoor_fetch_ts: float = 0.0
 _last_co2_estimate_ppm: float = 620.0
+_last_window_open_state: bool | None = None
+_window_transition_until_ts: float = 0.0
 
 
 def get_state(entity_id: str) -> str:
@@ -204,6 +206,8 @@ def _fetch_outdoor_weather() -> dict[str, float | None]:
 
 def _estimate_co2_ppm(humidity_pct: float | None, motion: bool | None, window_open: bool | None) -> float:
     global _last_co2_estimate_ppm
+    global _last_window_open_state
+    global _window_transition_until_ts
 
     # Simulated indoor air-quality proxy for demos when no physical CO2 sensor is available.
     # We compute a contextual target and then move gradually toward it.
@@ -221,20 +225,30 @@ def _estimate_co2_ppm(humidity_pct: float | None, motion: bool | None, window_op
 
     target_ppm = max(420.0, min(target_ppm, 2000.0))
 
+    now = time.time()
+    if window_open is not None and window_open != _last_window_open_state:
+        _last_window_open_state = window_open
+        # Opening/closing a window should impact CO2 progressively over tens of seconds.
+        _window_transition_until_ts = now + 90.0
+
     # Inertia to avoid unrealistic jumps when conditions change between samples.
     delta = target_ppm - _last_co2_estimate_ppm
 
-    # Scale per-cycle max step by poll interval (defaults to 5s -> ~30 ppm per sample).
+    # Scale per-cycle max step by poll interval (defaults to 5s -> ~15 ppm raw step).
     poll_seconds = max(1.0, float(POLL_SECONDS))
-    max_step = max(15.0, min(60.0, 6.0 * poll_seconds))
+    max_step = max(8.0, min(24.0, 3.0 * poll_seconds))
+
+    if now < _window_transition_until_ts:
+        # Right after window state changes, evolve more slowly to avoid visual spikes.
+        max_step *= 0.45
 
     if delta > max_step:
         delta = max_step
     elif delta < -max_step:
         delta = -max_step
 
-    # Small damping keeps trajectories smooth and plausible.
-    _last_co2_estimate_ppm += delta * 0.75
+    # Damping keeps trajectories smooth and plausible.
+    _last_co2_estimate_ppm += delta * 0.55
     _last_co2_estimate_ppm = max(420.0, min(_last_co2_estimate_ppm, 2000.0))
 
     return _last_co2_estimate_ppm
