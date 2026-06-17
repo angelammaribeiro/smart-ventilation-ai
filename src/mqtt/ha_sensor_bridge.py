@@ -16,8 +16,8 @@ HA_TOKEN = os.getenv("HA_TOKEN", "")
 
 MQTT_BROKER = os.getenv("MQTT_BROKER", "192.168.93.63")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
-MQTT_USER = os.getenv("MQTT_USER", "mqtt_user")
-MQTT_PASS = os.getenv("MQTT_PASS", "password")
+MQTT_USER = os.getenv("MQTT_USER", "")
+MQTT_PASS = os.getenv("MQTT_PASS", "")
 MQTT_TOPIC_STATE = os.getenv("MQTT_TOPIC_STATE", "smart_room/telemetry/state")
 MQTT_CONNECT_TIMEOUT_SECONDS = int(os.getenv("MQTT_CONNECT_TIMEOUT_SECONDS", "8"))
 WEATHER_LATITUDE = float(os.getenv("WEATHER_LATITUDE", "40.6405"))
@@ -54,7 +54,8 @@ try:
 except Exception:
     client = mqtt.Client()
 
-client.username_pw_set(MQTT_USER, MQTT_PASS)
+if MQTT_USER:
+    client.username_pw_set(MQTT_USER, MQTT_PASS)
 
 # ---------- HA REQUEST ----------
 headers = {
@@ -71,6 +72,64 @@ _last_outdoor_fetch_ts: float = 0.0
 _last_co2_estimate_ppm: float = 620.0
 _last_window_open_state: bool | None = None
 _window_transition_until_ts: float = 0.0
+_mqtt_connected: bool = False
+
+
+def _normalize_reason_code(reason_code: Any) -> tuple[int | None, str]:
+    reason_text = str(reason_code)
+    value = getattr(reason_code, "value", None)
+    if isinstance(value, (int, float)):
+        return int(value), reason_text
+    if isinstance(reason_code, (int, float)):
+        return int(reason_code), reason_text
+    try:
+        return int(reason_text), reason_text
+    except (TypeError, ValueError):
+        return None, reason_text
+
+
+def _on_connect(
+    client_obj: mqtt.Client,
+    userdata: Any,
+    flags: dict[str, Any],
+    reason_code: Any,
+    properties: Any = None,
+) -> None:
+    global _mqtt_connected
+    _ = client_obj, userdata, flags, properties
+
+    rc_value, reason_text = _normalize_reason_code(reason_code)
+    reason_text_lc = reason_text.lower()
+    is_success = rc_value == 0 or reason_text_lc in {"success", "0"}
+
+    if is_success:
+        _mqtt_connected = True
+        print(f"MQTT connected to {MQTT_BROKER}:{MQTT_PORT}")
+        return
+
+    _mqtt_connected = False
+    print(
+        "MQTT connection failed: "
+        f"reason_code={reason_text}. Check MQTT_BROKER/MQTT_PORT and MQTT_USER/MQTT_PASS."
+    )
+
+
+def _on_disconnect(
+    client_obj: mqtt.Client,
+    userdata: Any,
+    flags: dict[str, Any],
+    reason_code: Any,
+    properties: Any = None,
+) -> None:
+    global _mqtt_connected
+    _ = client_obj, userdata, flags, properties
+    _mqtt_connected = False
+    _, reason_text = _normalize_reason_code(reason_code)
+    print(f"MQTT disconnected: reason_code={reason_text}")
+
+
+client.on_connect = _on_connect
+client.on_disconnect = _on_disconnect
 
 
 def get_state(entity_id: str) -> str:
@@ -322,8 +381,22 @@ def _connect_mqtt() -> None:
             f"Current MQTT_BROKER={MQTT_BROKER}, MQTT_PORT={MQTT_PORT}."
         ) from exc
 
+    deadline = time.time() + max(2, MQTT_CONNECT_TIMEOUT_SECONDS)
+    while not _mqtt_connected and time.time() < deadline:
+        time.sleep(0.1)
+
+    if not _mqtt_connected:
+        raise RuntimeError(
+            "MQTT connect handshake did not complete. "
+            "If broker requires credentials, export MQTT_USER/MQTT_PASS correctly."
+        )
+
 
 def _publish(topic: str, payload: Any) -> None:
+    if not _mqtt_connected:
+        print(f"MQTT not connected, skipping publish: topic={topic}")
+        return
+
     info = client.publish(topic, payload, qos=0)
     if info.rc != mqtt.MQTT_ERR_SUCCESS:
         print(f"MQTT publish failed: topic={topic} rc={info.rc}")
@@ -333,8 +406,8 @@ def main() -> None:
     if not HA_TOKEN:
         raise RuntimeError("HA_TOKEN is not set. Export HA_TOKEN before running this script.")
 
-    _connect_mqtt()
     client.loop_start()
+    _connect_mqtt()
 
     try:
         while True:
