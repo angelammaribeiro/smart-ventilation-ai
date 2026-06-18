@@ -51,8 +51,15 @@ class MQTTClient:
         try:
             self._connect_error = None
             self._connected = False
-            self._client.connect(self.host, self.port, keepalive=30)
+            rc = self._client.connect(self.host, self.port, keepalive=30)
             self._client.loop_start()
+
+            mqtt_ok = getattr(mqtt, "MQTT_ERR_SUCCESS", 0)
+            if rc == mqtt_ok:
+                # connect() is blocking and successful on local brokers; mark connected immediately.
+                self._connected = True
+                return
+            self._connect_error = f"rc={rc}"
 
             deadline = time.time() + 2.0
             while time.time() < deadline and not self._connected and self._connect_error is None:
