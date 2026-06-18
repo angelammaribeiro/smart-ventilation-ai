@@ -29,6 +29,7 @@ class MQTTClient:
             self._client.username_pw_set(username, password or "")
         if self._client is not None:
             self._client.on_connect = self._on_connect
+            self._client.on_disconnect = self._on_disconnect
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:  # noqa: ANN001
         _ = client, userdata, flags, properties
@@ -44,6 +45,12 @@ class MQTTClient:
         else:
             self._connected = False
             self._connect_error = str(reason_code)
+
+    def _on_disconnect(self, client, userdata, reason_code, properties=None) -> None:  # noqa: ANN001
+        _ = client, userdata, properties
+        self._connected = False
+        if reason_code not in (0, None):
+            self._connect_error = f"disconnect rc={reason_code}"
 
     def connect(self) -> None:
         if self._client is None or self._connected:
@@ -80,13 +87,26 @@ class MQTTClient:
         self.connect()
         if not self._connected:
             return
+        rc = self._publish_once(topic=topic, payload=payload)
+        mqtt_ok = getattr(mqtt, "MQTT_ERR_SUCCESS", 0)
+        if rc is not None and rc != mqtt_ok:
+            # Retry once after forcing reconnect when publish says not connected.
+            mqtt_no_conn = getattr(mqtt, "MQTT_ERR_NO_CONN", 4)
+            if rc == mqtt_no_conn:
+                self._connected = False
+                self.connect()
+                if self._connected:
+                    rc = self._publish_once(topic=topic, payload=payload)
+
+            if rc is not None and rc != mqtt_ok:
+                print(f"MQTT publish failed topic={topic} rc={rc}")
+
+    def _publish_once(self, topic: str, payload: dict) -> int | None:
+        if self._client is None:
+            return None
         message = self._client.publish(topic, json.dumps(payload), qos=1)
         try:
             message.wait_for_publish(timeout=2.0)
         except Exception:
             pass
-
-        rc = getattr(message, "rc", None)
-        mqtt_ok = getattr(mqtt, "MQTT_ERR_SUCCESS", 0)
-        if rc is not None and rc != mqtt_ok:
-            print(f"MQTT publish failed topic={topic} rc={rc}")
+        return getattr(message, "rc", None)
