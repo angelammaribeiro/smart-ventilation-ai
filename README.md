@@ -27,3 +27,11 @@ AI-assisted indoor ventilation control system using sensor fusion, weather conte
 
 - Hardware sensor access is mocked by default in this scaffold.
 - Replace placeholders with real drivers, credentials, and trained model.
+
+## Raspberry Pi SSH Access
+
+Use the following command from your computer terminal to connect to the Raspberry Pi:
+
+```bash
+ssh root@172.20.10.3 -p 2222
+```

@@ -41,6 +41,8 @@ class DecisionEngine:
         temp_now: float,
         temp_out_now: float | None = None,
         is_raining_now: bool = False,
+        anomaly_flag: bool = False,
+        anomaly_score: float | None = None,
     ) -> VentilationDecision:
         predicted_co2_drop = pred_co2_closed - pred_co2_open
         predicted_temperature_drop = temp_now - pred_temp_open
@@ -51,6 +53,11 @@ class DecisionEngine:
 
         if not window_open_now and co2_now >= self.co2_bad_limit:
             return VentilationDecision("open_window", "CO2 above poor-air threshold")
+
+        # 1b) Learned anomaly signal (conservative usage)
+        if anomaly_flag and not window_open_now and co2_now >= self.co2_good_limit:
+            score_text = f" (score={anomaly_score:.3f})" if anomaly_score is not None else ""
+            return VentilationDecision("open_window", f"Anomalous indoor pattern detected{score_text}")
 
         # 2) Thermal anomalies
         if not window_open_now and temp_now >= self.temp_hot_limit:

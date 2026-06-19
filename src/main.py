@@ -7,6 +7,7 @@ import time
 import requests
 
 from contracts.observation import Observation
+from inference.anomaly_detector import AnomalyDetector
 from inference.decision_engine import DecisionEngine
 from inference.predictor import Predictor
 from inference.simulator import ScenarioSimulator
@@ -91,6 +92,7 @@ def run_once(
     weather = WeatherAPI()
 
     predictor = Predictor(model_path="models/trained_model.pkl")
+    anomaly_detector = AnomalyDetector(model_path="models/anomaly_model.pkl")
     simulator = ScenarioSimulator(predictor=predictor)
     decision_engine = DecisionEngine()
 
@@ -145,6 +147,7 @@ def run_once(
         is_raining=bool(weather_snapshot.is_raining),
     )
     scenario = simulator.evaluate(observation)
+    anomaly = anomaly_detector.score_observation(observation.to_model_features())
 
     decision = decision_engine.decide(
         co2_now=observation.co2_ppm,
@@ -156,6 +159,8 @@ def run_once(
         temp_now=observation.temperature_c,
         temp_out_now=observation.temp_out,
         is_raining_now=bool(observation.is_raining),
+        anomaly_flag=bool(anomaly.is_anomaly) if anomaly is not None else False,
+        anomaly_score=float(anomaly.score) if anomaly is not None else None,
     )
 
     row = observation.to_dict()
@@ -165,6 +170,8 @@ def run_once(
             "pred_temp_closed": round(scenario.pred_temp_closed, 2),
             "pred_co2_open": round(scenario.pred_co2_open, 2),
             "pred_temp_open": round(scenario.pred_temp_open, 2),
+            "anomaly_score": round(float(anomaly.score), 5) if anomaly is not None else None,
+            "anomaly_flag": int(anomaly.is_anomaly) if anomaly is not None else 0,
             "action": decision.action,
             "reason": decision.reason,
         }
